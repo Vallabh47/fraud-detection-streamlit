@@ -2,20 +2,35 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import joblib
-from datetime import datetime
 
-# -----------------------------
-# Load Model
-# -----------------------------
+# ================================
+# Load model
+# ================================
 @st.cache_resource
 def load_model():
     return joblib.load("fraud_detector_final.pkl")
 
 model = load_model()
 
-# -----------------------------
-# REQUIRED FEATURE COLUMNS
-# -----------------------------
+# ================================
+# Load dataset for dropdown values
+# ================================
+@st.cache_resource
+def load_data():
+    df = pd.read_csv("FRAUD DETECTION.csv")
+    return df
+
+df_raw = load_data()
+
+# Unique dropdown values from dataset
+LOCATIONS = sorted(df_raw['location'].dropna().unique().tolist())
+CARD_TYPES = sorted(df_raw['card_type'].dropna().unique().tolist())
+PURCHASE_CATEGORIES = sorted(df_raw['purchase_category'].dropna().unique().tolist())
+FRAUD_TYPES = sorted(df_raw['fraud_type'].dropna().unique().tolist())
+
+# ================================
+# Features required by your model
+# ================================
 FEATURES = [
     'amount',
     'card_type',
@@ -32,74 +47,66 @@ FEATURES = [
     'purchase_category_fraud_rate'
 ]
 
-# -----------------------------
-# Feature Engineering Function
-# -----------------------------
+# ================================
+# Feature Engineering
+# ================================
 def engineer_features(df):
-    """Recreate the engineered features from your notebook"""
-    
-    # Convert transaction_time to datetime
     df["transaction_time"] = pd.to_datetime(df["transaction_time"])
 
     df["tx_hour"] = df["transaction_time"].dt.hour
     df["tx_weekday"] = df["transaction_time"].dt.weekday
 
-    # Feature: amount_per_age
     df["amount_per_age"] = df["amount"] / (df["customer_age"] + 1)
 
-    # Feature: is_night (10 PM to 5 AM)
     df["is_night"] = df["tx_hour"].apply(lambda h: 1 if (h >= 22 or h <= 5) else 0)
-
-    # Feature: is_weekend
     df["is_weekend"] = df["tx_weekday"].apply(lambda d: 1 if d >= 5 else 0)
 
-    # Risk score placeholders (your notebook created these)
-    df["location_fraud_rate"] = 0.05   # replace with actual rate if available
-    df["purchase_category_fraud_rate"] = 0.05  # replace if needed
+    # Default risk scores (your notebook created these)
+    df["location_fraud_rate"] = 0.05
+    df["purchase_category_fraud_rate"] = 0.05
 
     return df
 
-# -----------------------------
+# ================================
 # Prediction
-# -----------------------------
-def predict_single(input_data):
-    df = pd.DataFrame([input_data])
-
+# ================================
+def predict_single(data):
+    df = pd.DataFrame([data])
     df = engineer_features(df)
-
-    # Keep only required columns
     df = df[FEATURES]
 
     pred = model.predict(df)[0]
-    prob = None
 
     try:
         prob = model.predict_proba(df)[0][1]
     except:
-        pass
+        prob = None
 
     return pred, prob
 
-# -----------------------------
+# ================================
 # Streamlit UI
-# -----------------------------
-st.title("🔍 Online Fraud Detection System")
-st.write("Enter transaction details below:")
+# ================================
+st.title("🔍 Online Payment Fraud Detection")
+
+st.subheader("Enter transaction details")
 
 amount = st.number_input("Transaction Amount", min_value=0.0)
 
-card_type = st.selectbox("Card Type", ["Rupay", "MasterCard", "Visa", "Unknown"])
+card_type = st.selectbox("Card Type", CARD_TYPES)
 
-location = st.selectbox("Location", ["Bangalore", "Hyderabad", "Surat", "Unknown"])
+location = st.selectbox("Location", LOCATIONS)
 
-purchase_category = st.selectbox("Purchase Category", ["POS", "Digital", "Unknown"])
+purchase_category = st.selectbox("Purchase Category", PURCHASE_CATEGORIES)
 
 customer_age = st.number_input("Customer Age", min_value=10, max_value=100)
 
-fraud_type = st.selectbox("Fraud Type", ["Identity theft", "Malware", "Payment card fraud", "scam"])
+fraud_type = st.selectbox("Fraud Type", FRAUD_TYPES)
 
-transaction_time = st.text_input("Transaction Date-Time (YYYY-MM-DD HH:MM)",
-                                 value="2024-01-01 12:30")
+transaction_time = st.text_input(
+    "Transaction Date-Time (YYYY-MM-DD HH:MM)", 
+    value="2024-01-01 12:30"
+)
 
 if st.button("Predict Fraud"):
     input_data = {
@@ -114,9 +121,9 @@ if st.button("Predict Fraud"):
 
     pred, prob = predict_single(input_data)
 
-    st.subheader("Result:")
+    st.subheader("Prediction Result:")
     if pred == 1:
-        st.error("⚠ Fraudulent Transaction")
+        st.error("⚠ Fraudulent Transaction Detected")
     else:
         st.success("✔ Legitimate Transaction")
 
