@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import joblib
+from datetime import datetime
 
 # -----------------------------
 # Load Model
@@ -13,7 +14,7 @@ def load_model():
 model = load_model()
 
 # -----------------------------
-# Feature Columns (from your dataset)
+# REQUIRED FEATURE COLUMNS
 # -----------------------------
 FEATURES = [
     'amount',
@@ -21,128 +22,103 @@ FEATURES = [
     'location',
     'purchase_category',
     'customer_age',
-    'fraud_type'
+    'fraud_type',
+    'tx_hour',
+    'tx_weekday',
+    'amount_per_age',
+    'is_night',
+    'is_weekend',
+    'location_fraud_rate',
+    'purchase_category_fraud_rate'
 ]
 
 # -----------------------------
-# Preprocessing (same as notebook)
+# Feature Engineering Function
 # -----------------------------
-def preprocess(df):
-    # Categorical columns
-    cat_cols = ['card_type', 'location', 'purchase_category', 'fraud_type']
-    # Numeric columns
-    num_cols = ['amount', 'customer_age']
+def engineer_features(df):
+    """Recreate the engineered features from your notebook"""
+    
+    # Convert transaction_time to datetime
+    df["transaction_time"] = pd.to_datetime(df["transaction_time"])
 
-    # Fill missing categorical with "unknown"
-    for c in cat_cols:
-        if c in df.columns:
-            df[c] = df[c].fillna("unknown")
+    df["tx_hour"] = df["transaction_time"].dt.hour
+    df["tx_weekday"] = df["transaction_time"].dt.weekday
 
-    # Fill numeric missing with median
-    for c in num_cols:
-        if c in df.columns:
-            df[c] = df[c].fillna(df[c].median())
+    # Feature: amount_per_age
+    df["amount_per_age"] = df["amount"] / (df["customer_age"] + 1)
+
+    # Feature: is_night (10 PM to 5 AM)
+    df["is_night"] = df["tx_hour"].apply(lambda h: 1 if (h >= 22 or h <= 5) else 0)
+
+    # Feature: is_weekend
+    df["is_weekend"] = df["tx_weekday"].apply(lambda d: 1 if d >= 5 else 0)
+
+    # Risk score placeholders (your notebook created these)
+    df["location_fraud_rate"] = 0.05   # replace with actual rate if available
+    df["purchase_category_fraud_rate"] = 0.05  # replace if needed
 
     return df
 
 # -----------------------------
-# Prediction Function
+# Prediction
 # -----------------------------
 def predict_single(input_data):
     df = pd.DataFrame([input_data])
-    df = preprocess(df)
-    pred = model.predict(df)[0]
 
-    # probability (if supported)
+    df = engineer_features(df)
+
+    # Keep only required columns
+    df = df[FEATURES]
+
+    pred = model.predict(df)[0]
+    prob = None
+
     try:
         prob = model.predict_proba(df)[0][1]
     except:
-        prob = None
+        pass
 
     return pred, prob
 
 # -----------------------------
-# Streamlit App UI
+# Streamlit UI
 # -----------------------------
-st.title("🔍 Online Payment Fraud Detection")
-st.write("Enter transaction details or upload a CSV to detect fraud.")
+st.title("🔍 Online Fraud Detection System")
+st.write("Enter transaction details below:")
 
-mode = st.radio("Select mode:", ["Single Transaction", "Batch Prediction (CSV)"])
+amount = st.number_input("Transaction Amount", min_value=0.0)
 
-# --------------------------------------
-# SINGLE INPUT SECTION
-# --------------------------------------
-if mode == "Single Transaction":
-    st.subheader("Enter Transaction Details")
+card_type = st.selectbox("Card Type", ["Rupay", "MasterCard", "Visa", "Unknown"])
 
-    amount = st.number_input("Transaction Amount", min_value=0.0, step=0.1)
+location = st.selectbox("Location", ["Bangalore", "Hyderabad", "Surat", "Unknown"])
 
-    card_type = st.selectbox("Card Type", 
-                             ["Rupay", "MasterCard", "Visa", "unknown"])
+purchase_category = st.selectbox("Purchase Category", ["POS", "Digital", "Unknown"])
 
-    location = st.selectbox("Location", 
-                            ["Bangalore", "Hyderabad", "Surat", "unknown"])
+customer_age = st.number_input("Customer Age", min_value=10, max_value=100)
 
-    purchase_category = st.selectbox("Purchase Category", 
-                                     ["POS", "Digital", "unknown"])
+fraud_type = st.selectbox("Fraud Type", ["Identity theft", "Malware", "Payment card fraud", "scam"])
 
-    customer_age = st.number_input("Customer Age", min_value=10, max_value=100, step=1)
+transaction_time = st.text_input("Transaction Date-Time (YYYY-MM-DD HH:MM)",
+                                 value="2024-01-01 12:30")
 
-    fraud_type = st.selectbox("Fraud Type",
-                              ["Identity theft", "Malware", "Payment card fraud", "scam", "unknown"])
+if st.button("Predict Fraud"):
+    input_data = {
+        "amount": amount,
+        "card_type": card_type,
+        "location": location,
+        "purchase_category": purchase_category,
+        "customer_age": customer_age,
+        "fraud_type": fraud_type,
+        "transaction_time": transaction_time
+    }
 
-    if st.button("Predict"):
-        input_data = {
-            'amount': amount,
-            'card_type': card_type,
-            'location': location,
-            'purchase_category': purchase_category,
-            'customer_age': customer_age,
-            'fraud_type': fraud_type
-        }
+    pred, prob = predict_single(input_data)
 
-        pred, prob = predict_single(input_data)
+    st.subheader("Result:")
+    if pred == 1:
+        st.error("⚠ Fraudulent Transaction")
+    else:
+        st.success("✔ Legitimate Transaction")
 
-        st.write("### Result:")
-        st.success("Fraudulent Transaction ❌" if pred == 1 else "Legitimate Transaction ✔")
-
-        if prob is not None:
-            st.write(f"**Fraud Probability:** {prob:.4f}")
-
-# --------------------------------------
-# BATCH UPLOAD SECTION
-# --------------------------------------
-else:
-    st.subheader("Upload CSV for Batch Prediction")
-
-    uploaded = st.file_uploader("Upload a CSV file", type=["csv"])
-
-    if uploaded:
-        df = pd.read_csv(uploaded)
-
-        st.write("### Preview of uploaded data:")
-        st.dataframe(df.head())
-
-        # Preprocess
-        df_proc = preprocess(df.copy())
-
-        # Predict
-        try:
-            preds = model.predict(df_proc)
-            try:
-                probs = model.predict_proba(df_proc)[:, 1]
-                df['fraud_probability'] = probs
-            except:
-                probs = None
-
-            df['fraud_prediction'] = preds
-
-            st.write("### Output:")
-            st.dataframe(df.head())
-
-            # Download button
-            csv = df.to_csv(index=False).encode('utf-8')
-            st.download_button("Download Results CSV", csv, "fraud_predictions.csv")
-
-        except Exception as e:
-            st.error(f"Error while predicting: {e}")
+    if prob is not None:
+        st.write(f"Fraud Probability: {prob:.4f}")
