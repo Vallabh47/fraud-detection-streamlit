@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import joblib
 import numpy as np
+from datetime import datetime
 
 # ----------------------------------------
 # LOAD MODEL & DATA
@@ -41,18 +42,36 @@ location = st.selectbox("Transaction Location", locations)
 purchase_category = st.selectbox("Purchase Category", purchase_categories)
 fraud_type = st.selectbox("Fraud Type", fraud_types)
 
-tx_hour = st.slider("Transaction Hour (0-23)", 0, 23, 12)
-tx_weekday = st.slider("Transaction Weekday (0 = Monday, 6 = Sunday)", 0, 6, 2)
+# -------------------------
+# RESTORED : DATETIME INPUT
+# -------------------------
+transaction_time = st.text_input(
+    "Transaction Date-Time (Format: YYYY-MM-DD HH:MM:SS)",
+    "2024-05-01 13:24:00"
+)
 
 # ----------------------------------------
-# FEATURE ENGINEERING (EXACT AS TRAINING)
+# FEATURE ENGINEERING (EXACT LIKE TRAINING)
 # ----------------------------------------
+try:
+    # Convert to datetime
+    dt = datetime.strptime(transaction_time, "%Y-%m-%d %H:%M:%S")
+
+    tx_hour = dt.hour
+    tx_weekday = dt.weekday()
+
+    is_night = 1 if tx_hour >= 22 or tx_hour <= 5 else 0
+    is_weekend = 1 if tx_weekday in [5, 6] else 0
+
+except:
+    st.warning("⚠ Please enter date-time in correct format: YYYY-MM-DD HH:MM:SS")
+    tx_hour = 0
+    tx_weekday = 0
+    is_night = 0
+    is_weekend = 0
+
 amount_per_age = amount / (customer_age + 1)
 
-is_night = 1 if tx_hour >= 22 or tx_hour <= 5 else 0
-is_weekend = 1 if tx_weekday in [5, 6] else 0
-
-# Compute fraud rates safely
 location_fraud_rate = dataset.groupby("location")["is_fraudulent"].mean().get(location, dataset["is_fraudulent"].mean())
 purchase_category_fraud_rate = dataset.groupby("purchase_category")["is_fraudulent"].mean().get(purchase_category, dataset["is_fraudulent"].mean())
 
@@ -81,7 +100,7 @@ if st.button("Predict"):
 
         prediction = model.predict(input_df)[0]
 
-        # ------ FINAL OUTPUT (NO PROBABILITY SHOWN) ------
+        # FINAL CLEAN OUTPUT
         if prediction == 1:
             st.error("🚨 **Fraud Detected** — This transaction shows high fraud characteristics.")
         else:
